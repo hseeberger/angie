@@ -24,28 +24,32 @@ impl<const N: usize> MerkleTree<N> {
             .take(leaf_count);
         nodes.extend(leaves);
 
-        let mut index = 0;
-        let mut level_len = leaf_count;
-        while level_len > 1 {
-            let end = index + level_len;
-            let parents = &nodes[index..end]
+        // Iterate over children (initially leaves) to build parents.
+        let mut start_index = 0;
+        let mut children_len = leaf_count;
+        while children_len > 1 {
+            let end_index = start_index + children_len;
+            let children = &nodes[start_index..end_index];
+
+            let parents = children
                 .chunks(2)
                 .map(|chunk| {
                     let (left, right) = (chunk[0], chunk[1]);
                     hasher.concat_hashes(left, right)
                 })
                 .collect::<Vec<_>>();
+
             nodes.extend(parents);
 
-            index += level_len;
-            level_len /= 2;
+            start_index += children_len;
+            children_len /= 2;
         }
 
         Self { nodes, leaf_count }
     }
 
     pub fn root(&self) -> Hash<N> {
-        *self.nodes.last().unwrap()
+        *self.nodes.last().unwrap() // Safe by construction, see `new`!
     }
 
     pub fn proof(&self, mut index: usize) -> MerkleProof<N> {
@@ -57,9 +61,10 @@ impl<const N: usize> MerkleTree<N> {
         let path_len = self.leaf_count.trailing_zeros() as usize;
         let mut path = Vec::with_capacity(path_len);
 
-        let mut prev_level_len = 0;
-        let mut level_len = self.leaf_count;
-        while level_len > 1 {
+        let mut prev_children_len = 0;
+        let mut children_len = self.leaf_count;
+        while children_len > 1 {
+            // Push the sibling.
             let position = if index % 2 == 0 {
                 PositionedHash::Right(self.nodes[index + 1])
             } else {
@@ -67,9 +72,10 @@ impl<const N: usize> MerkleTree<N> {
             };
             path.push(position);
 
-            index = index + level_len - (index - prev_level_len + 1) / 2;
-            prev_level_len = level_len;
-            level_len /= 2;
+            // Not really intuitive, but correct and tested.
+            index = index + children_len - (index - prev_children_len + 1) / 2;
+            prev_children_len = children_len;
+            children_len /= 2;
         }
 
         MerkleProof {
